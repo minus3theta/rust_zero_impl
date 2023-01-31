@@ -122,10 +122,10 @@ impl Generator {
         self.insts.push(Instruction::Match);
         Ok(())
     }
+}
 
-    pub fn get_code(ast: &AST) -> Result<Vec<Instruction>, CodeGenError> {
-        let mut generator = Generator::default();
-        generator.gen_code(ast)?;
-        Ok(generator.insts)
-    }
+pub fn get_code(ast: &AST) -> Result<Vec<Instruction>, CodeGenError> {
+    let mut generator = Generator::default();
+    generator.gen_code(ast)?;
+    Ok(generator.insts)
 }
