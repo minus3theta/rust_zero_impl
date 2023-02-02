@@ -257,16 +257,13 @@ impl Worker {
 
         let mut output = None;
 
-        let pgid;
-        match fork_exec(Pid::from_raw(0), cmd[0].0, &cmd[0].1, None, output) {
-            Ok(child) => {
-                pgid = child;
-            }
+        let pgid = match fork_exec(Pid::from_raw(0), cmd[0].0, &cmd[0].1, None, output) {
+            Ok(child) => child,
             Err(e) => {
                 eprintln!("ZeroSh: プロセス生成エラー: {e}");
                 return false;
             }
-        }
+        };
 
         let info = ProcInfo {
             state: ProcState::Run,
@@ -434,7 +431,7 @@ fn fork_exec(
     }
 }
 
-type CmdResult<'a> = Result<Vec<(&'a str, Vec<&'a str>)>, anyhow::Error>;
+type CmdResult<'a> = anyhow::Result<Vec<(&'a str, Vec<&'a str>)>>;
 
 fn parse_cmd(line: &str) -> CmdResult {
     let commands = line.split(" | ");
@@ -444,9 +441,21 @@ fn parse_cmd(line: &str) -> CmdResult {
             if cmd.is_empty() {
                 bail!("ParseError: empty command");
             }
-            let mut words = cmd.split(' ');
-            let name = words.next().unwrap();
-            Ok((name, words.collect()))
+            let args: Vec<_> = cmd.split(' ').collect();
+            let name = *args.first().unwrap();
+            Ok((name, args))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse() -> anyhow::Result<()> {
+        let cmd = parse_cmd("ls -l")?;
+        assert_eq!(cmd, vec![("ls", vec!["ls", "-l"])]);
+        Ok(())
+    }
 }
