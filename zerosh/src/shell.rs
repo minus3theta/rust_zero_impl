@@ -288,8 +288,13 @@ impl Worker {
                     self.exit_val = status;
                     self.process_term(pid, shell_tx);
                 }
-                Ok(WaitStatus::Signaled(pid, signal, core)) => {
-                    todo!()
+                Ok(WaitStatus::Signaled(pid, sig, core)) => {
+                    eprintln!(
+                        "\nZeroSh: 子プロセスがシグナルにより終了{}: pid = {pid}, signal = {sig}",
+                        if core { "（コアダンプ）" } else { "" }
+                    );
+                    self.exit_val = sig as i32 + 128;
+                    self.process_term(pid, shell_tx);
                 }
                 Ok(WaitStatus::Stopped(pid, _sig)) => self.process_stop(pid, shell_tx),
                 Ok(WaitStatus::Continued(pid)) => todo!(),
@@ -382,12 +387,7 @@ impl Worker {
     }
 
     fn get_new_job_id(&self) -> Option<usize> {
-        for i in 0..=usize::MAX {
-            if !self.jobs.contains_key(&i) {
-                return Some(i);
-            }
-        }
-        None
+        (0..=usize::MAX).find(|&i| !self.jobs.contains_key(&i))
     }
 }
 
