@@ -11,7 +11,7 @@ use anyhow::bail;
 use nix::{
     libc,
     sys::{
-        signal::{signal, SigHandler, Signal},
+        signal::{killpg, signal, SigHandler, Signal},
         wait::{waitpid, WaitPidFlag, WaitStatus},
     },
     unistd::{self, dup2, execvp, fork, setpgid, tcgetpgrp, tcsetpgrp, ForkResult, Pid},
@@ -234,8 +234,30 @@ impl Worker {
         todo!()
     }
 
-    fn run_fg(&self, cmd: &[&str], shell_tx: &SyncSender<ShellMsg>) -> bool {
-        todo!()
+    fn run_fg(&mut self, args: &[&str], shell_tx: &SyncSender<ShellMsg>) -> bool {
+        self.exit_val = 1;
+
+        if args.len() < 2 {
+            eprintln!("usage: fg 数字");
+            shell_tx.send(ShellMsg::Continue(self.exit_val)).unwrap();
+            return true;
+        }
+
+        if let Ok(n) = args[1].parse::<usize>() {
+            if let Some((pgid, cmd)) = self.jobs.get(&n) {
+                eprintln!("[{n}] 再開\t{cmd}");
+
+                self.fg = Some(*pgid);
+                tcsetpgrp(libc::STDIN_FILENO, *pgid).unwrap();
+
+                killpg(*pgid, Signal::SIGCONT).unwrap();
+                return true;
+            }
+        }
+
+        eprintln!("{}というジョブは見つかりませんでした", args[1]);
+        shell_tx.send(ShellMsg::Continue(self.exit_val)).unwrap();
+        true
     }
 
     fn run_cd(&self, cmd: &[&str], shell_tx: &SyncSender<ShellMsg>) -> bool {
@@ -298,7 +320,7 @@ impl Worker {
                     self.process_term(pid, shell_tx);
                 }
                 Ok(WaitStatus::Stopped(pid, _sig)) => self.process_stop(pid, shell_tx),
-                Ok(WaitStatus::Continued(pid)) => todo!(),
+                Ok(WaitStatus::Continued(pid)) => self.process_continue(pid),
                 Ok(WaitStatus::StillAlive) => return,
                 Err(nix::Error::ECHILD) => return,
                 Err(e) => {
@@ -403,6 +425,10 @@ impl Worker {
     fn set_pid_state(&mut self, pid: Pid, state: ProcState) -> Option<ProcState> {
         let info = self.pid_to_info.get_mut(&pid)?;
         Some(replace(&mut info.state, state))
+    }
+
+    fn process_continue(&mut self, pid: Pid) {
+        self.set_pid_state(pid, ProcState::Run);
     }
 }
 
