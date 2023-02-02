@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::CString,
+    mem::replace,
     process::exit,
     sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender},
     thread,
@@ -115,7 +116,7 @@ impl Shell {
 }
 
 fn spawn_sig_handler(tx: Sender<WorkerMsg>) -> Result<(), anyhow::Error> {
-    let mut signals = Signals::new(&[SIGINT, SIGTSTP, SIGCHLD])?;
+    let mut signals = Signals::new([SIGINT, SIGTSTP, SIGCHLD])?;
     thread::spawn(move || {
         for sig in signals.forever() {
             tx.send(WorkerMsg::Signal(sig)).unwrap();
@@ -319,8 +320,11 @@ impl Worker {
         }
     }
 
-    fn process_stop(&self, pid: Pid, shell_tx: &SyncSender<ShellMsg>) {
-        todo!()
+    fn process_stop(&mut self, pid: Pid, shell_tx: &SyncSender<ShellMsg>) {
+        self.set_pid_state(pid, ProcState::Stop);
+        let pgid = self.pid_to_info.get(&pid).unwrap().pgid;
+        let job_id = self.pgid_to_pids.get(&pgid).unwrap().0;
+        self.manage_job(job_id, pgid, shell_tx);
     }
 
     fn manage_job(&mut self, job_id: usize, pgid: Pid, shell_tx: &SyncSender<ShellMsg>) {
@@ -332,7 +336,8 @@ impl Worker {
                 self.remove_job(job_id);
                 self.set_shell_fg(shell_tx);
             } else if self.is_group_stop(pgid).unwrap() {
-                todo!()
+                eprintln!("\n[{job_id}] 停止\t{line}");
+                self.set_shell_fg(shell_tx);
             }
         } else if self.is_group_empty(pgid) {
             eprintln!("\n[{job_id}] 終了\t{line}");
@@ -369,7 +374,12 @@ impl Worker {
     }
 
     fn is_group_stop(&self, pgid: Pid) -> Option<bool> {
-        todo!()
+        for pid in self.pgid_to_pids.get(&pgid)?.1.iter() {
+            if self.pid_to_info.get(pid).unwrap().state == ProcState::Run {
+                return Some(false);
+            }
+        }
+        Some(true)
     }
 
     fn remove_pid(&mut self, pid: Pid) -> Option<(usize, Pid)> {
@@ -388,6 +398,11 @@ impl Worker {
 
     fn get_new_job_id(&self) -> Option<usize> {
         (0..=usize::MAX).find(|&i| !self.jobs.contains_key(&i))
+    }
+
+    fn set_pid_state(&mut self, pid: Pid, state: ProcState) -> Option<ProcState> {
+        let info = self.pid_to_info.get_mut(&pid)?;
+        Some(replace(&mut info.state, state))
     }
 }
 
@@ -434,7 +449,7 @@ fn fork_exec(
 type CmdResult<'a> = anyhow::Result<Vec<(&'a str, Vec<&'a str>)>>;
 
 fn parse_cmd(line: &str) -> CmdResult {
-    let commands = line.split(" | ");
+    let commands = line.split('|');
     commands
         .map(|cmd| {
             let cmd = cmd.trim();
@@ -456,6 +471,16 @@ mod tests {
     fn test_parse() -> anyhow::Result<()> {
         let cmd = parse_cmd("ls -l")?;
         assert_eq!(cmd, vec![("ls", vec!["ls", "-l"])]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_pipe() -> anyhow::Result<()> {
+        let cmd = parse_cmd("ls -l | grep a")?;
+        assert_eq!(
+            cmd,
+            vec![("ls", vec!["ls", "-l"]), ("grep", vec!["grep", "a"])]
+        );
         Ok(())
     }
 }
