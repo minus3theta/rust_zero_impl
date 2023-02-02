@@ -1,0 +1,19 @@
+[package]
+name = "zerosh"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.68"
+dirs = "4.0.0"
+nix = "0.26.2"
+rustyline = "10.1.1"
+signal-hook = "0.3.14"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
