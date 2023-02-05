@@ -14,7 +14,7 @@ use nix::{
         signal::{killpg, signal, SigHandler, Signal},
         wait::{waitpid, WaitPidFlag, WaitStatus},
     },
-    unistd::{self, dup2, execvp, fork, setpgid, tcgetpgrp, tcsetpgrp, ForkResult, Pid},
+    unistd::{self, dup2, execvp, fork, pipe, setpgid, tcgetpgrp, tcsetpgrp, ForkResult, Pid},
 };
 use rustyline::{error::ReadlineError, Editor};
 use signal_hook::{consts::*, iterator::Signals};
@@ -136,6 +136,22 @@ enum ProcState {
 struct ProcInfo {
     state: ProcState,
     pgid: Pid,
+}
+
+struct CleanUp<F>
+where
+    F: Fn(),
+{
+    f: F,
+}
+
+impl<F> Drop for CleanUp<F>
+where
+    F: Fn(),
+{
+    fn drop(&mut self) {
+        (self.f)()
+    }
 }
 
 #[derive(Debug)]
@@ -274,26 +290,42 @@ impl Worker {
             return false;
         };
 
-        if cmd.len() >= 2 {
-            todo!("pipe is not supported yet");
-        }
-
-        let mut output = None;
-
-        let pgid = match fork_exec(Pid::from_raw(0), cmd[0].0, &cmd[0].1, None, output) {
-            Ok(child) => child,
-            Err(e) => {
-                eprintln!("ZeroSh: プロセス生成エラー: {e}");
-                return false;
-            }
-        };
-
-        let info = ProcInfo {
-            state: ProcState::Run,
-            pgid,
-        };
+        let mut pgid = Pid::from_raw(0);
         let mut pids = HashMap::new();
-        pids.insert(pgid, info.clone());
+
+        let mut input = None;
+
+        for (i, &(file, ref args)) in cmd.iter().enumerate() {
+            let (next_input, output, cleanup_pipe) = if i != cmd.len() - 1 {
+                let (in_fd, out_fd) = pipe().unwrap();
+                let cleanup = CleanUp {
+                    f: move || syscall(|| unistd::close(out_fd)).unwrap(),
+                };
+                (Some(in_fd), Some(out_fd), Some(cleanup))
+            } else {
+                (None, None, None)
+            };
+            dbg!(input, output);
+            let pid = match fork_exec(pgid, file, args, input, output) {
+                Ok(child) => child,
+                Err(e) => {
+                    eprintln!("ZeroSh: プロセス生成エラー: {e}");
+                    return false;
+                }
+            };
+            std::mem::drop(cleanup_pipe);
+            input = next_input;
+            if i == 0 {
+                pgid = pid;
+            }
+            pids.insert(
+                pid,
+                ProcInfo {
+                    state: ProcState::Run,
+                    pgid,
+                },
+            );
+        }
 
         self.fg = Some(pgid);
         self.insert_job(job_id, pgid, pids, line);
