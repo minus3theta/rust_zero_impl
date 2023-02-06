@@ -246,8 +246,14 @@ impl Worker {
         true
     }
 
-    fn run_jobs(&self, shell_tx: &SyncSender<ShellMsg>) -> bool {
-        todo!()
+    fn run_jobs(&mut self, shell_tx: &SyncSender<ShellMsg>) -> bool {
+        for (job_id, (_, line)) in &self.jobs {
+            eprintln!("[{job_id}] 停止\t{line}");
+        }
+
+        self.exit_val = 0;
+        shell_tx.send(ShellMsg::Continue(self.exit_val)).unwrap();
+        true
     }
 
     fn run_fg(&mut self, args: &[&str], shell_tx: &SyncSender<ShellMsg>) -> bool {
@@ -305,7 +311,6 @@ impl Worker {
             } else {
                 (None, None, None)
             };
-            dbg!(input, output);
             let pid = match fork_exec(pgid, file, args, input, output) {
                 Ok(child) => child,
                 Err(e) => {
