@@ -1,4 +1,7 @@
-use std::ffi::{c_void, CString};
+use std::{
+    ffi::{c_void, CString},
+    marker::PhantomData,
+};
 
 use anyhow::bail;
 use nix::{
@@ -21,11 +24,11 @@ pub struct DbgInfo {
 
 pub struct ZDbg<T> {
     info: Box<DbgInfo>,
-    _state: T,
+    _state: std::marker::PhantomData<T>,
 }
 
-pub struct Running;
-pub struct NotRunning;
+pub enum Running {}
+pub enum NotRunning {}
 
 pub enum State {
     Running(ZDbg<Running>),
@@ -63,7 +66,7 @@ impl ZDbg<NotRunning> {
                 brk_val: 0,
                 filename,
             }),
-            _state: NotRunning,
+            _state: PhantomData,
         }
     }
 
@@ -109,7 +112,7 @@ impl ZDbg<NotRunning> {
                     self.info.pid = child;
                     let mut dbg = ZDbg::<Running> {
                         info: self.info,
-                        _state: Running,
+                        _state: PhantomData,
                     };
                     dbg.set_break()?;
                     dbg.do_continue()
@@ -229,7 +232,7 @@ impl ZDbg<Running> {
                     println!("<<子プロセスが終了しました>>");
                     return Ok(State::NotRunning(ZDbg {
                         info: self.info,
-                        _state: NotRunning,
+                        _state: PhantomData,
                     }));
                 }
                 _ => (),
@@ -246,7 +249,7 @@ impl ZDbg<Running> {
                 println!("<<子プロセスが終了しました>>");
                 Ok(State::NotRunning(ZDbg {
                     info: self.info,
-                    _state: NotRunning,
+                    _state: PhantomData,
                 }))
             }
             WaitStatus::Stopped(..) => {
