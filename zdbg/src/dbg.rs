@@ -275,7 +275,20 @@ impl ZDbg<Running> {
     }
 
     fn do_stepi(self) -> anyhow::Result<State> {
-        todo!()
+        let regs = ptrace::getregs(self.info.pid)?;
+        if Some((regs.rip) as *mut c_void) == self.info.brk_addr {
+            unsafe {
+                ptrace::write(
+                    self.info.pid,
+                    self.info.brk_addr.unwrap(),
+                    self.info.brk_val as *mut c_void,
+                )?
+            };
+            self.step_and_break()
+        } else {
+            ptrace::step(self.info.pid, None)?;
+            self.wait_child()
+        }
     }
 }
 
